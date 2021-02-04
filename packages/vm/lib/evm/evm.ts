@@ -290,6 +290,7 @@ export default class EVM {
       allowedCodeSize = false
     }
     // If enough gas and allowed code size
+    let CodestoreOOG = false
     if (
       totalGas.lte(message.gasLimit) &&
       (this._vm._allowUnlimitedContractSize || allowedCodeSize)
@@ -303,6 +304,7 @@ export default class EVM {
         if (totalGas.sub(returnFee).lte(message.gasLimit)) {
           // we cannot pay the code deposit fee (but the deposit code actually did run)
           result = { ...result, ...COOGResult(totalGas.sub(returnFee)) }
+          CodestoreOOG = true
         } else {
           result = { ...result, ...OOGResult(message.gasLimit) }
         }
@@ -312,6 +314,17 @@ export default class EVM {
     // Save code if a new contract was created
     if (!result.exceptionError && result.returnValue && result.returnValue.toString() !== '') {
       await this._state.putContractCode(message.to, result.returnValue)
+    } else if (CodestoreOOG) {
+      // This only happens at Frontier. But, let's do a sanity check;
+      if (!this._vm._common.gteHardfork('homestead')) {
+        // Pre-Homestead behavior; put an empty contract.
+        // This contract would be considered "DEAD" in later hard forks.
+        // It is thus an unecessary default item, which we have to save to dik
+        // It does change the state root, but it only wastes storage.
+        //await this._state.putContractCode(message.to, result.returnValue)
+        const account = await this._state.getAccount(message.to)
+        await this._state.putAccount(message.to, account)
+      }
     }
 
     return {
